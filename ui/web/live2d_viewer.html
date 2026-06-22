@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Monika Live2D Viewer</title>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            background: transparent; 
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+        }
+        #canvas { 
+            display: block; 
+            width: 100%;
+            height: 100%;
+        }
+        #debug {
+            position: fixed;
+            top: 5px;
+            left: 5px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #0f0;
+            font-family: monospace;
+            font-size: 10px;
+            max-width: 300px;
+            max-height: 100px;
+            overflow-y: auto;
+            padding: 5px;
+            border-radius: 3px;
+            z-index: 9999;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+    </style>
+    
+    <!-- 本地库（已下载到 lib/ 目录，无需 CDN）-->
+    <!-- 1. PixiJS v7（pixi-live2d-display 需要 v6 或 v7，不支持 v8）-->
+    <script src="lib/pixi.min.js"
+        onload="console.log('[SCRIPT] pixi.min.js OK, PIXI=' + (typeof PIXI))"
+        onerror="console.error('[SCRIPT] pixi.min.js 加载失败！')"></script>
+    <!-- 2. Live2D Cubism 4 Core 运行时 -->
+    <script src="lib/live2dcubismcore.min.js"
+        onload="console.log('[SCRIPT] live2dcubismcore.min.js OK, Live2DCubismCore=' + (typeof Live2DCubismCore))"
+        onerror="console.error('[SCRIPT] live2dcubismcore.min.js 加载失败！')"></script>
+    <!-- 3. pixi-live2d-display Cubism4 专用构建 -->
+    <script src="lib/pixi-live2d-display-cubism4.min.js"
+        onload="console.log('[SCRIPT] pixi-live2d-display-cubism4 OK, PIXI.Live2DModel=' + (typeof (PIXI && PIXI.Live2DModel)))"
+        onerror="console.error('[SCRIPT] pixi-live2d-display-cubism4 加载失败！')"></script>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="debug"></div>
+    
+    <!-- 主脚本：在 DOM 和 CDN 都加载完成后执行 -->
+    <script>
+        // ===== 全局状态 =====
+        window._live2dReady = false;
+        
+        const maxDebugLines = 15;
+        let debugLines = [];
+        let app = null;
+        let currentModel = null;
+
+        // 初始变换（由 Python 通过 setInitialTransform 写入）
+        let _initScale = null;
+        let _initX = null;
+        let _initY = null;
+
+        // 拖拽状态
+        let _dragging = false;
+        let _dragStartClient = { x: 0, y: 0 };
+        let _dragStartModel = { x: 0, y: 0 };
+        
+        function debug(msg) {
+            console.log("[Live2D] " + msg);
+            debugLines.push(new Date().toLocaleTimeString() + ": " + msg);
+            if (debugLines.length > maxDebugLines) {
+                debugLines.shift();
+            }
+            let div = document.getElementById('debug');
+            if (div) {
+                div.textContent = debugLines.join('\n');
+            }
+        }
+        
+        // 初始化应用
+        function initializeApp() {
+            if (app) {
+                return true; // 已初始化
+            }
+            
+            try {
+                debug("初始化 PixiJS 应用...");
+                
+                const canvas = document.getElementById('canvas');
+                if (!canvas) {
+                    debug("ERROR: canvas 元素未找到");
+                    return false;
+                }
+                
+                // 检查 PIXI 库和 Application 是否可用
+                if (typeof PIXI === 'undefined') {
+                    debug("ERROR: PIXI 库未加载");
+                    return false;
+                }
+                
+                if (typeof PIXI.Application === 'undefined') {
+                    debug("ERROR: PIXI.Application 未定义，库可能加载不完整");
+                    return false;
+                }
+                
+                app = new PIXI.Application({
+                    view: canvas,
+                    backgroundColor: 0x000000,
+                    backgroundAlpha: 0,
+                    resizeTo: window,
+                    antialias: true,
+                    resolution: window.devicePixelRatio || 1,
+                    autoDensity: true,
+                    powerPreference: 'low-power'
+                });
+                
+                debug("✓ PixiJS 应用已创建");
+                
+                // 延迟标记为 ready
+                setTimeout(() => {
+                    window._live2dReady = true;
+                    debug("✓ 初始化完成，可以加载模型");
+                }, 200);
+                
+                return true;
+            } catch (err) {
+                debug("ERROR 初始化: " + err.message);
+                console.error("Init error:", err);
+                return false;
+            }
+        }
+        
+        // 来自 Qt/Python 的模型加载接口
+        window.loadModel = function(modelUrl) {
+            debug("loadModel called: " + modelUrl);
+            
+            // 尝试初始化应用（如果还没初始化）
+            if (!app) {
+                if (!initializeApp()) {
+                    debug("ERROR: 无法初始化应用，延迟重试");
+                    setTimeout(() => window.loadModel(modelUrl), 500);
+                    return;
+                }
+            }
+            
+            // 检查 URL 有效性
+            if (!modelUrl || modelUrl === 'undefined') {
+                debug("ERROR: modelUrl 为空");
+                return;
+            }
+            
+            debug("正在加载模型...");
+            
+            // 等待 Live2DModel 库可用
+            function tryLoadModel(attempts) {
+                try {
+                    // 检查 Live2DModel 是否可用（浏览器全局路径是 PIXI.live2d.Live2DModel）
+                    if (!window.PIXI || !window.PIXI.live2d || !window.PIXI.live2d.Live2DModel) {
+                        if (attempts < 20) {  // 重试最多 20 次（每次 500ms，共 10 秒）
+                            debug("等待 Live2D 库加载... (" + attempts + "/20)");
+                            setTimeout(() => tryLoadModel(attempts + 1), 500);
+                            return;
+                        }
+                        
+                        // 超过重试次数，显示占位符
+                        debug("PIXI.live2d: " + typeof (window.PIXI && window.PIXI.live2d));
+                        debug("警告: PIXI.live2d.Live2DModel 加载失败，显示占位符");
+                        
+                        const placeholder = new PIXI.Graphics();
+                        placeholder.beginFill(0x333333);
+                        placeholder.drawRect(0, 0, 400, 400);
+                        placeholder.endFill();
+                        
+                        const text = new PIXI.Text("Live2D\n加载失败\n\n请检查网络连接", {
+                            fontSize: 20,
+                            fill: 0xff0000,
+                            align: 'center'
+                        });
+                        text.x = 50;
+                        text.y = 140;
+                        
+                        app.stage.addChild(placeholder);
+                        app.stage.addChild(text);
+                        debug("✓ 已显示占位符");
+                        return;
+                    }
+                    
+                    // Live2DModel 可用，加载模型
+                    debug("Live2D 库已加载，开始加载模型...");
+                    
+                    PIXI.live2d.Live2DModel.from(modelUrl, { autoUpdate: true })
+                        .then(model => {
+                            debug("✓ 模型加载成功");
+                            
+                            if (currentModel) {
+                                app.stage.removeChild(currentModel);
+                                currentModel.destroy();
+                            }
+                            
+                    currentModel = model;
+                            app.stage.addChild(model);
+                            debug("✓ 模型已添加到舞台");
+                            
+                            // 设置锚点为模型胸部位置，显示上半身
+                            model.anchor.set(0.5, 0.4);
+
+                            // 使用上次记忆的位置和缩放；若无记忆则自动适配
+                            if (_initScale !== null) {
+                                model.scale.set(_initScale);
+                                model.position.set(_initX, _initY);
+                                debug("已恢复上次变换: scale=" + _initScale.toFixed(2) +
+                                      " pos=(" + Math.round(_initX) + "," + Math.round(_initY) + ")");
+                            } else {
+                                const scaleX = app.view.width / model.width;
+                                const scaleY = app.view.height / model.height;
+                                const scale = Math.min(scaleX, scaleY) * 1.8;
+                                model.scale.set(scale);
+                                model.position.set(app.view.width * 0.5, app.view.height * 0.75);
+                                debug("自动适配: scale=" + scale.toFixed(2));
+                            }
+
+                            // -- 拖拽 ------------------------------
+                            const canvas = document.getElementById('canvas');
+                            canvas.addEventListener('mousedown', function(e) {
+                                if (e.button !== 0) return;
+                                _dragging = true;
+                                _dragStartClient = { x: e.clientX, y: e.clientY };
+                                _dragStartModel = { x: currentModel.position.x, y: currentModel.position.y };
+                                e.preventDefault();
+                            });
+                            window.addEventListener('mousemove', function(e) {
+                                if (!_dragging || !currentModel) return;
+                                currentModel.position.set(
+                                    _dragStartModel.x + e.clientX - _dragStartClient.x,
+                                    _dragStartModel.y + e.clientY - _dragStartClient.y
+                                );
+                            });
+                            window.addEventListener('mouseup', function(e) {
+                                if (_dragging) { _dragging = false; }
+                            });
+
+                            // -- 滚轮缩放 --------------------------
+                            canvas.addEventListener('wheel', function(e) {
+                                if (!currentModel) return;
+                                e.preventDefault();
+                                const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+                                currentModel.scale.set(
+                                    Math.max(0.1, Math.min(10, currentModel.scale.x * factor))
+                                );
+                            }, { passive: false });
+                            
+                            debug("✓ 模型渲染成功");
+                        })
+                        .catch(err => {
+                            debug("ERROR 模型加载: " + err.message);
+                            console.error("Model load error:", err);
+                        });
+                } catch (err) {
+                    debug("ERROR 异常: " + err.message);
+                    console.error("Exception:", err);
+                }
+            }
+            
+            // 开始尝试加载
+            tryLoadModel(0);
+        };
+
+        // -- 口型同步 ------------------------------------------
+        // setTalking：保留接口（后端偶尔调用），但逻辑已由 setMouthParams 接管
+        window.setTalking = function(is_talking) {
+            if (!is_talking && currentModel) {
+                try {
+                    var core = currentModel.internalModel.coreModel;
+                    core.setParameterValueById('ParamMouthOpenY', 0);
+                    core.setParameterValueById('ParamJawOpen', 0);
+                } catch(e) {}
+            }
+        };
+
+        /**
+         * setMouthParams(params)
+         * params: JS 对象，key = Live2D Param ID，value = 数值
+         * 由 Python bus._drive_lipsync 每帧调用，直接写入 coreModel
+         */
+        window.setMouthParams = function(params) {
+            if (!currentModel) return;
+            try {
+                var core = currentModel.internalModel.coreModel;
+                for (var id in params) {
+                    core.setParameterValueById(id, params[id]);
+                }
+            } catch(e) {}
+        };
+
+        // -- 表情切换 ------------------------------------------
+        const _NEUTRAL_NAMES = new Set(['normal', 'idle', 'neutral', '', 'null', 'none']);
+
+        window.setEmotion = function(name) {
+            if (!currentModel) return;
+            if (!name || _NEUTRAL_NAMES.has(String(name).toLowerCase())) {
+                try {
+                    currentModel.expression();  // 无参数 = 重置为默认表情
+                    debug("表情已重置");
+                } catch(e) { debug("表情重置失败: " + e); }
+            } else {
+                try {
+                    currentModel.expression(name);
+                    debug("表情: " + name);
+                } catch(e) { debug("表情切换失败 (" + name + "): " + e); }
+            }
+        };
+
+        window.triggerMotion = function(name, group) {
+            if (!currentModel || !name) return;
+            try {
+                // 优先按 group 触发，fallback 直接用名字
+                if (group) {
+                    currentModel.motion(group);
+                } else {
+                    currentModel.motion(name);
+                }
+                debug("动作: " + name);
+            } catch(e) { debug("动作触发失败 (" + name + "): " + e); }
+        };
+
+        // Python 在 loadModel 之前调用，写入上次记忆的变换
+        window.setInitialTransform = function(scale, x, y) {
+            _initScale = scale;
+            _initX = x;
+            _initY = y;
+            debug("收到初始变换: scale=" + scale + " x=" + x + " y=" + y);
+        };
+
+        // Python 关闭前调用，取得当前变换以便保存
+        window.getModelTransform = function() {
+            if (!currentModel) return null;
+            return {
+                scale: currentModel.scale.x,
+                x: currentModel.position.x,
+                y: currentModel.position.y
+            };
+        };
+
+        // Python 运行时调用（模式切换），直接应用到已加载模型
+        window.applyTransform = function(scale, x, y) {
+            _initScale = scale;
+            _initX = x;
+            _initY = y;
+            if (currentModel) {
+                currentModel.scale.set(scale);
+                currentModel.position.set(x, y);
+                debug("已应用变换: scale=" + scale.toFixed(2) + " x=" + Math.round(x) + " y=" + Math.round(y));
+            }
+        };
+
+        // 窗口尺寸改变时不再自动重算（用户手动调整）
+        window.onWindowResize = function() {};
+        
+        debug("✓ 脚本加载完成");
+        debug("PIXI=" + typeof PIXI + " live2d=" + typeof (PIXI && PIXI.live2d) + " Live2DModel=" + typeof (PIXI && PIXI.live2d && PIXI.live2d.Live2DModel));
+    </script>
+</body>
+</html>
