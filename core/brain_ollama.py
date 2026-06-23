@@ -10,7 +10,7 @@ import aiohttp
 from openai import AsyncOpenAI
 from utils.config_loader import get_config
 from utils.logger import get_logger
-from core.brain_base import BrainBase, _ThinkFilter
+from core.brain_base import BrainBase
 
 log = get_logger(__name__)
 
@@ -126,22 +126,22 @@ class Brain(BrainBase):
             yield "(panic)[glitch]大脑连接好像出错了"
             return
 
-        think_filter = _ThinkFilter( # 已弃用！！！
-            start_in_think=enable_thinking,
-        )
-        think_buf = []
+        # think_filter = _ThinkFilter( # 已弃用！！！
+        #     start_in_think=enable_thinking,
+        # )
+        # think_buf = []
 
-        async for chunk in response:
-            if chunk.choices[0].delta.content:
-                visible, think = think_filter.feed(chunk.choices[0].delta.content)
-                if think:
-                    think_buf.append(think)
-                if visible:
-                    yield visible
+        # async for chunk in response:
+        #     if chunk.choices[0].delta.content:
+        #         visible, think = think_filter.feed(chunk.choices[0].delta.content)
+        #         if think:
+        #             think_buf.append(think)
+        #         if visible:
+        #             yield visible
 
-        leftover, _ = think_filter.flush()
-        if leftover:
-            yield leftover
+        # leftover, _ = think_filter.flush()
+        # if leftover:
+        #     yield leftover
 
-        if think_buf and enable_thinking:
-            log.debug("[Brain.Think]\n%s", ''.join(think_buf).strip())
+        # if think_buf and enable_thinking:
+        #     log.debug("[Brain.Think]\n%s", ''.join(think_buf).strip())
