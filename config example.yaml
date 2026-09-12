@@ -1,0 +1,147 @@
+brain:
+  backend: gguf
+  ollama:
+    base_url: http://localhost:11434/v1
+    model_name: Monika:latest
+    temperature: 0.85
+    max_history_turns: 14
+  gguf:
+    model_path: assets\model\Monika-qwen3.5.gguf
+    external_template: assets\model\chat_template_Qwen3.5.jinja
+    n_gpu_layers: 22
+    n_ctx: 4096
+    n_batch: 512
+    temperature: 1.0
+    top_p: 0.9
+    top_k: 20.0
+    min_p: 0.05
+    repeat_penalty: 1.12
+    max_history_turns: 14
+    enable_thinking: false
+    max_tokens: 256
+  character:
+    example_enabled: true
+    lore_inject_every_n: 0
+    prompt_compact: "【核心人设】"
+    prompt: '【核心人设】
+      '
+    examples: '【示例（严禁直接使用，仅供参考）】
+      '
+ears:
+  mic_id: null
+  device: cpu
+  model_name: modules/SenseVoiceSmall
+  samplerate: 16000
+  block_size: 4000
+  vad_threshold: 0.018
+  interrupt_vad_threshold: 0.02
+  silence_limit: 0.5
+  silence_as_text_rate: 0.5
+  pre_buffer_len: 4
+  echo_cancellation:
+    enable_deepfilter: false
+    loopback_keyword: ''
+    loopback_device_id: 16
+  emotion:
+    enabled: true
+    add_to_context: true
+tts:
+  server_url: http://127.0.0.1:5000/tts_stream
+  health_url: http://127.0.0.1:5000/health
+  sample_rate: 24000
+  ref_audio_path: assets/wav/ref/2-2.wav
+  ref_text: 我还记得这间会议室这是专门为特蕾西娅空着的位置吗？不......我并不需要
+  text_lang: zh
+  ref_lang: zh
+  if_sr: true
+  speed: 1.0
+audio:
+  device_keyword: Voicemeeter Input
+  input_mode: mic_push_to_talk
+  ptt_key: Space
+  device_id: 16
+vts:
+  plugin_name: Monika_Core
+  developer: YourName
+  token_path: ./vts_token.txt
+  motion_reset_hotkey: idle
+  motion_hold_time: 0.5
+context:
+  time:
+    enabled: true
+    format: '%Y/%m/%d %A %H:%M'
+memory:
+  enabled: false
+  memory_dir: ./assets
+  max_retrieval: 3
+  session:
+    path: ./assets/memory/session.json
+    max_turns: 14
+    reply_max_chars: 256
+  profile:
+    path: ./assets/memory/chr.json
+  vector_db:
+    collection_name: monika_conversations
+    db_path: ./assets/memory/chroma_db
+  lore:
+    enabled: false
+    chunks_path: ./assets/memory/lore_chunks.json
+    max_retrieval: 2
+    distance_threshold: 0.7
+speaker_id:
+  enabled: true
+  data_path: assets/memory/speakers.json
+  threshold: 0.65
+  host_api: 0
+proactive_output:
+  enabled: true
+  cooling_windows:
+  - - 240
+    - 300
+  - - 360
+    - 600
+multimodal:
+  vision:
+    enabled: false
+    model_name: ''
+    capture_device: 0
+  screen:
+    enabled: false
+    ocr_lang: ch_sim
+tools:
+  enabled: false
+  max_tool_calls_per_turn: 3
+  timeout: 30
+  web_search:
+    enabled: false
+    api_key: ''
+  weather:
+    enabled: false
+launcher:
+  ollama:
+    auto_start: true
+    exe_path: ollama
+    health_url: http://localhost:11434/v1/models
+    timeout: 30
+  tts:
+    auto_start: true
+    python_exe: modules/GPT-SoVITS-v2pro-20250604/runtime/python.exe
+    script: modules/GPT-SoVITS-v2pro-20250604/tts_v3_server.py
+    work_dir: modules/GPT-SoVITS-v2pro-20250604
+    health_url: http://127.0.0.1:5000/health
+    timeout: 120
+  apps:
+    vts:
+      auto_start: false
+      exe_path: D:\Program Files (x86)\Steam\steamapps\common\VTube Studio\VTube Studio.exe
+    voicemeeter:
+      auto_start: false
+      exe_path: C:\Program Files (x86)\VB\Voicemeeter\voicemeeterpro.exe
+ui:
+  live2d_model: Mk3_v2.2__by_0x4682B4_
+  debug_mode: true
+  live2d_visible: true
+  live2d_scale: 0.3796
+  live2d_x: 334.0
+  live2d_y: 827.5
+
